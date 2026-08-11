@@ -1,0 +1,93 @@
+@import "tailwindcss";
+
+@theme {
+  --color-red-650: #cc1d1d;
+  --color-rose-650: #db1c5f;
+  --color-orange-650: #ea580c;
+}
+
+:root {
+  --background: #0f0a0a;
+  --foreground: #ffffff;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-plus-jakarta-sans), sans-serif;
+  user-select: none;
+}
+
+video {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100vh;
+  object-fit: cover;
+  z-index: -1;
+}
+
+input[type=range] {
+  accent-color: #FFB300;
+}
+
+/* Indian-gold range thumb */
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #FFB300;
+  border: 2px solid #8B0000;
+  box-shadow: 0 0 6px rgba(255,179,0,0.6);
+  cursor: pointer;
+}
+
+input[type=range]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #FFB300;
+  border: 2px solid #8B0000;
+  box-shadow: 0 0 6px rgba(255,179,0,0.6);
+  cursor: pointer;
+}
+
+/* Custom Webkit scrollbar for sleek tracklist */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spinning {
+  animation: spin 8s linear infinite;
+}
+
+.spinning-paused {
+  animation-play-state: paused;
+}
