@@ -8,7 +8,10 @@ if (!URI) {
   );
 }
 
-const options = {};
+const options = {
+  serverSelectionTimeoutMS: 5000,
+  connectTimeoutMS: 10000,
+};
 
 let client: MongoClient;
 let clientPromise: Promise<MongoClient>;
