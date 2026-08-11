@@ -89,7 +89,7 @@ export default function Home() {
 
   // Time, Date & WebSocket state
   const [dateTime, setDateTime] = useState<Date | null>(null);
-  const [onlineCount, setOnlineCount] = useState(12);
+  const [onlineCount, setOnlineCount] = useState(0);
 
   // Configuration
   const [apiKey, setApiKey] = useState("");
@@ -104,6 +104,11 @@ export default function Home() {
   const currentIndexRef = useRef(currentIndex);
   const nicknameRef = useRef(nickname);
   const isChatOpenRef = useRef(isChatOpen);
+
+  // ── Analytics tracking refs ──
+  const sessionIdRef = useRef<string>("");
+  const songsPlayedRef = useRef(0);
+  const chatMsgCountRef = useRef(0);
 
   useEffect(() => {
     isChatOpenRef.current = isChatOpen;
@@ -160,6 +165,48 @@ export default function Home() {
         document.head.appendChild(tag);
       }
     }
+  }, []);
+
+  // ── Analytics: fire visit on mount, heartbeat ping every 30s ──
+  useEffect(() => {
+    // Generate or reuse a sessionId stored in localStorage
+    let sid = localStorage.getItem("_deshbhakt_sid");
+    if (!sid) {
+      sid = Math.random().toString(36).slice(2) + Date.now().toString(36);
+      localStorage.setItem("_deshbhakt_sid", sid);
+    }
+    sessionIdRef.current = sid;
+    const nick = localStorage.getItem("chat_nickname") || "Anonymous";
+
+    // Fire initial visit
+    fetch("/api/track/visit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: sid,
+        nickname: nick,
+        referrer: document.referrer || "direct",
+      }),
+    }).catch(() => {});
+
+    // Heartbeat every 30s
+    const pingInterval = setInterval(() => {
+      fetch("/api/track/ping", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: sessionIdRef.current,
+          nickname: nicknameRef.current || localStorage.getItem("chat_nickname") || "Anonymous",
+          songsPlayed: songsPlayedRef.current,
+          chatMessages: chatMsgCountRef.current,
+        }),
+      }).catch(() => {});
+      // Reset delta counters after each ping
+      songsPlayedRef.current = 0;
+      chatMsgCountRef.current = 0;
+    }, 30_000);
+
+    return () => clearInterval(pingInterval);
   }, []);
 
   // Fetch playlist whenever API settings change (after component mounted)
@@ -269,6 +316,9 @@ export default function Home() {
           onStateChange: (event: any) => {
             if (event.data === window.YT.PlayerState.PLAYING) {
               setIsPlaying(true);
+              // Refresh duration on every PLAYING event — loadVideoById skips CUED
+              const dur = event.target.getDuration();
+              if (dur > 0) setDuration(dur);
             } else {
               setIsPlaying(false);
             }
@@ -278,7 +328,8 @@ export default function Home() {
             }
 
             if (event.data === window.YT.PlayerState.CUED) {
-              setDuration(event.target.getDuration());
+              const dur = event.target.getDuration();
+              if (dur > 0) setDuration(dur);
             }
           },
         },
@@ -303,6 +354,9 @@ export default function Home() {
       interval = setInterval(() => {
         if (playerRef.current && typeof playerRef.current.getCurrentTime === "function") {
           setCurrentTime(playerRef.current.getCurrentTime());
+          // Keep duration in sync — getDuration() may return 0 briefly while buffering
+          const liveDur = playerRef.current.getDuration?.();
+          if (liveDur > 0) setDuration(liveDur);
         }
       }, 500);
     }
@@ -423,13 +477,6 @@ export default function Home() {
               }
             }
           } catch (e) { }
-
-          // Fluctuates count organically upon receiving socket activity
-          setOnlineCount((prev) => {
-            const delta = Math.random() > 0.5 ? 1 : -1;
-            const nextCount = prev + delta;
-            return nextCount > 4 ? nextCount : 5;
-          });
         };
 
         ws.onerror = (err) => {
@@ -447,21 +494,53 @@ export default function Home() {
 
     connectSocket();
 
-    // Regular interval fluctuator so user count changes even on message delay
-    const counterTimer = setInterval(() => {
-      setOnlineCount((prev) => {
-        const delta = Math.random() > 0.6 ? 1 : Math.random() > 0.6 ? -1 : 0;
-        const nextCount = prev + delta;
-        return nextCount > 4 ? (nextCount < 100 ? nextCount : 98) : 5;
-      });
-    }, 5000);
-
     return () => {
       if (socket) socket.close();
       clearTimeout(reconnectTimeout);
-      clearInterval(counterTimer);
     };
   }, [playlistId]);
+
+  // ── Real-time presence counter via ntfy.sh WebSocket ──
+  useEffect(() => {
+    const PRESENCE_TOPIC = "deshbhakt_presence_live_v1";
+    let presenceSocket: WebSocket | null = null;
+    let presenceReconnect: NodeJS.Timeout;
+
+    const connectPresence = () => {
+      try {
+        presenceSocket = new WebSocket(`wss://ntfy.sh/${PRESENCE_TOPIC}/ws`);
+
+        presenceSocket.onmessage = (event) => {
+          try {
+            const ntfyData = JSON.parse(event.data);
+            if (ntfyData.event === "message") {
+              const data = JSON.parse(ntfyData.message);
+              if (data?.type === "presence" && typeof data.count === "number") {
+                setOnlineCount(data.count);
+              }
+            }
+          } catch (_) {}
+        };
+
+        presenceSocket.onclose = () => {
+          presenceReconnect = setTimeout(connectPresence, 5000);
+        };
+
+        presenceSocket.onerror = () => {
+          presenceSocket?.close();
+        };
+      } catch (e) {
+        console.warn("Presence WebSocket failed:", e);
+      }
+    };
+
+    connectPresence();
+
+    return () => {
+      presenceSocket?.close();
+      clearTimeout(presenceReconnect);
+    };
+  }, []);
 
 
 
@@ -497,6 +576,8 @@ export default function Home() {
         method: "POST",
         body: JSON.stringify(msgPayload),
       });
+      // Track chat message sent
+      chatMsgCountRef.current += 1;
     } catch (e) {
       console.error("Failed to publish message:", e);
       showNotification("Failed to send message", "error");
@@ -553,6 +634,9 @@ export default function Home() {
     const newIndex = (index + playlist.length) % playlist.length;
     setCurrentIndex(newIndex);
     setCurrentTime(0);
+
+    // Track song played
+    songsPlayedRef.current += 1;
 
     if (autoPlayAfter) {
       playerRef.current.loadVideoById(playlist[newIndex].videoId);
